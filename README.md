@@ -76,6 +76,48 @@ python oauth_app.py
 
 Open <http://localhost:8000> and complete the OAuth flow. The token is stored locally in `oauth_tokens.json` by default.
 
+## Running with Docker & Docker Compose
+
+Alternatively, you can run the project using Docker and Docker Compose:
+
+### Build and Start with Docker Compose
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **`oauth-app`** on port `8000` (`http://localhost:8000`) for authentication.
+- **`mcp-server`** running the FastMCP server.
+
+### Run Single Docker Container
+
+Build the Docker image:
+
+```bash
+docker build -t basecamp-mcp:latest .
+```
+
+Run the OAuth App:
+
+```bash
+docker run -d \
+  --name basecamp-oauth \
+  -p 8000:8000 \
+  --env-file .env \
+  -v $(pwd)/oauth_tokens.json:/app/oauth_tokens.json \
+  basecamp-mcp:latest gunicorn --bind 0.0.0.0:8000 --workers 4 oauth_app:app
+```
+
+Run the MCP Server via Docker:
+
+```bash
+docker run -i --rm \
+  --env-file .env \
+  -v $(pwd)/oauth_tokens.json:/app/oauth_tokens.json \
+  basecamp-mcp:latest
+```
+
 ## Configure Your MCP Client
 
 ### Codex

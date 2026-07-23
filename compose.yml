@@ -1,0 +1,39 @@
+services:
+  oauth-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: basecamp-oauth-app
+    command: gunicorn --bind 0.0.0.0:8000 --workers 4 --access-logfile - oauth_app:app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./oauth_tokens.json:/app/oauth_tokens.json
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: always
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: basecamp-mcp-server
+    command: python basecamp_fastmcp.py
+    ports:
+      - "8001:8001"
+    environment:
+      - MCP_TRANSPORT=sse
+      - MCP_PORT=8001
+    env_file:
+      - .env
+    volumes:
+      - ./oauth_tokens.json:/app/oauth_tokens.json
+    stdin_open: true
+    tty: true
+    restart: always
