@@ -1,11 +1,5 @@
 """
-Flask application for handling the Basecamp 3 OAuth 2.0 authorization flow.
-
-This application provides endpoints for:
-1. Redirecting users to Basecamp for authorization
-2. Handling the OAuth callback
-3. Using the obtained token to access the Basecamp API
-4. Providing a secure token endpoint for the MCP server
+Flask application for handling the Basecamp 3 OAuth 2.0 authorization flow with Multi-User support.
 """
 
 import os
@@ -46,196 +40,138 @@ if missing_vars:
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(16))
 
-# HTML template for displaying results
-RESULTS_TEMPLATE = """
+# HTML template for displaying multi-user dashboard
+DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Basecamp 3 OAuth Demo</title>
+    <title>Basecamp MCP - Multi-User OAuth Dashboard</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        h1 { color: #333; }
-        pre { background-color: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto; }
-        .button {
-            display: inline-block;
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 20px;
-            text-decoration: none;
-            border-radius: 5px;
-            margin-top: 20px;
-        }
-        .warning {
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
-            color: #856404;
-            padding: 10px;
-            border-radius: 5px;
-            margin: 10px 0;
-        }
-        .container { max-width: 1000px; margin: 0 auto; }
-        form { margin-top: 20px; }
-        input[type="text"] { padding: 8px; width: 300px; }
-        button { padding: 8px 15px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; background: #f8fafc; color: #1e293b; }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        h1 { margin-top: 0; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; }
+        .user-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; background: #ffffff; }
+        .user-card.default { border-color: #22c55e; background: #f0fdf4; }
+        .user-info h3 { margin: 0 0 6px 0; color: #0f172a; font-size: 1.1em; }
+        .user-info p { margin: 2px 0; color: #64748b; font-size: 0.9em; }
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 9999px; font-size: 0.75em; font-weight: 600; text-transform: uppercase; }
+        .badge-default { background: #dcfce7; color: #15803d; }
+        .badge-expired { background: #fee2e2; color: #b91c1c; }
+        .badge-valid { background: #e0f2fe; color: #0369a1; }
+        .button { display: inline-block; background-color: #2563eb; color: white; padding: 8px 16px; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 0.9em; margin-left: 8px; border: none; cursor: pointer; }
+        .button-secondary { background-color: #64748b; }
+        .button-danger { background-color: #ef4444; }
+        .button-success { background-color: #16a34a; }
+        .actions { display: flex; align-items: center; }
+        pre { background-color: #0f172a; color: #f8fafc; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.85em; }
+        .add-account { margin-top: 24px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>{{ title }}</h1>
-        {% if message %}
-            <p>{{ message }}</p>
+        <h1>🔐 Basecamp MCP Multi-User Dashboard</h1>
+        
+        {% if users %}
+            <h2>Authenticated Accounts ({{ users|length }})</h2>
+            {% for user in users %}
+                <div class="user-card {% if user.is_default %}default{% endif %}">
+                    <div class="user-info">
+                        <h3>
+                            {{ user.name or 'Basecamp User' }} 
+                            {% if user.is_default %}
+                                <span class="badge badge-default">Active / Default</span>
+                            {% endif %}
+                            {% if user.is_expired %}
+                                <span class="badge badge-expired">Token Expired</span>
+                            {% else %}
+                                <span class="badge badge-valid">Token Active</span>
+                            {% endif %}
+                        </h3>
+                        <p><strong>User ID / Account ID:</strong> {{ user.user_id }} (Account: {{ user.account_id }})</p>
+                        <p><strong>Email:</strong> {{ user.email or 'N/A' }}</p>
+                        <p><strong>API Key:</strong> <code>{{ user.api_key }}</code></p>
+                    </div>
+                    <div class="actions">
+                        {% if not user.is_default %}
+                            <a href="/switch/{{ user.user_id }}" class="button button-secondary">Set as Default</a>
+                        {% endif %}
+                        <a href="/logout/{{ user.user_id }}" class="button button-danger" onclick="return confirm('Remove session for this user?')">Remove</a>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p>No Basecamp accounts are currently authenticated.</p>
         {% endif %}
-        {% if warning %}
-            <div class="warning">{{ warning }}</div>
-        {% endif %}
-        {% if content %}
-            <pre>{{ content }}</pre>
-        {% endif %}
-        {% if auth_url %}
-            <a href="{{ auth_url }}" class="button">Log in with Basecamp</a>
-        {% endif %}
-        {% if token_info %}
-            <h2>OAuth Token Information</h2>
-            <pre>{{ token_info | tojson(indent=2) }}</pre>
-        {% endif %}
-        {% if show_logout %}
-            <a href="/logout" class="button">Logout</a>
-        {% endif %}
-        {% if show_home %}
-            <a href="/" class="button">Home</a>
+
+        <div class="add-account">
+            {% if auth_url %}
+                <a href="{{ auth_url }}" class="button button-success" style="font-size: 1.1em; padding: 12px 24px;">➕ Authenticate New Basecamp Account</a>
+            {% endif %}
+        </div>
+
+        {% if default_user %}
+            <h2 style="margin-top: 30px;">🖥️ MCP Client Configuration for Active User ({{ default_user.name or default_user.user_id }})</h2>
+            <p>Set <code>BASECAMP_USER_ID</code> environment variable in your client config to route requests to this account:</p>
+            <pre>
+BASECAMP_USER_ID={{ default_user.user_id }}
+BASECAMP_ACCOUNT_ID={{ default_user.account_id }}
+            </pre>
         {% endif %}
     </div>
 </body>
 </html>
 """
 
-@app.template_filter('tojson')
-def to_json(value, indent=None):
-    return json.dumps(value, indent=indent)
 
 def get_oauth_client():
     """Get a configured OAuth client."""
-    try:
-        client_id = os.getenv('BASECAMP_CLIENT_ID')
-        client_secret = os.getenv('BASECAMP_CLIENT_SECRET')
-        redirect_uri = os.getenv('BASECAMP_REDIRECT_URI')
-        user_agent = os.getenv('USER_AGENT')
+    client_id = os.getenv('BASECAMP_CLIENT_ID')
+    client_secret = os.getenv('BASECAMP_CLIENT_SECRET')
+    redirect_uri = os.getenv('BASECAMP_REDIRECT_URI')
+    user_agent = os.getenv('USER_AGENT')
 
-        logger.info("Creating OAuth client with config: %s, %s, %s", client_id, redirect_uri, user_agent)
+    return BasecampOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        user_agent=user_agent
+    )
 
-        return BasecampOAuth(
-            client_id=client_id,
-            client_secret=client_secret,
-            redirect_uri=redirect_uri,
-            user_agent=user_agent
-        )
-    except Exception as e:
-        logger.error("Error creating OAuth client: %s", str(e))
-        raise
-
-def ensure_valid_token():
-    """
-    Ensure we have a valid, non-expired token. 
-    Attempts to refresh if expired.
-    
-    Returns:
-        dict: Valid token data or None if authentication is needed
-    """
-    token_data = token_storage.get_token()
-    
-    if not token_data or not token_data.get('access_token'):
-        logger.info("No token found")
-        return None
-    
-    # Check if token is expired
-    if token_storage.is_token_expired():
-        logger.info("Token is expired, attempting to refresh")
-        
-        refresh_token = token_data.get('refresh_token')
-        if not refresh_token:
-            logger.warning("No refresh token available, user needs to re-authenticate")
-            return None
-        
-        try:
-            oauth_client = get_oauth_client()
-            new_token_data = oauth_client.refresh_token(refresh_token)
-            
-            # Store the new token
-            access_token = new_token_data.get('access_token')
-            new_refresh_token = new_token_data.get('refresh_token', refresh_token)  # Use old refresh token if new one not provided
-            expires_in = new_token_data.get('expires_in')
-            account_id = token_data.get('account_id')  # Keep the existing account_id
-            
-            if access_token:
-                token_storage.store_token(
-                    access_token=access_token,
-                    refresh_token=new_refresh_token,
-                    expires_in=expires_in,
-                    account_id=account_id
-                )
-                logger.info("Token refreshed successfully")
-                return token_storage.get_token()
-            else:
-                logger.error("No access token in refresh response")
-                return None
-                
-        except Exception as e:
-            logger.error("Failed to refresh token: %s", str(e))
-            return None
-    
-    logger.info("Token is valid")
-    return token_data
 
 @app.route('/')
 def home():
-    """Home page."""
-    # Ensure we have a valid token
-    token_data = ensure_valid_token()
+    """Multi-User Dashboard."""
+    users = token_storage.list_users()
+    default_user = token_storage.get_user_token(None)
 
-    if token_data and token_data.get('access_token'):
-        # We have a valid token, show token information
-        access_token = token_data['access_token']
-        # Mask the token for security
-        masked_token = f"{access_token[:10]}...{access_token[-10:]}" if len(access_token) > 20 else "***"
+    auth_url = None
+    try:
+        oauth_client = get_oauth_client()
+        auth_url = oauth_client.get_authorization_url()
+    except Exception as e:
+        logger.error(f"Error generating auth url: {e}")
 
-        token_info = {
-            "access_token": masked_token,
-            "account_id": token_data.get('account_id'),
-            "has_refresh_token": bool(token_data.get('refresh_token')),
-            "expires_at": token_data.get('expires_at'),
-            "updated_at": token_data.get('updated_at')
-        }
+    return render_template_string(
+        DASHBOARD_TEMPLATE,
+        users=users,
+        default_user=default_user,
+        auth_url=auth_url
+    )
 
-        logger.info("Home page: User is authenticated")
 
-        return render_template_string(
-            RESULTS_TEMPLATE,
-            title="Basecamp OAuth Status",
-            message="You are authenticated with Basecamp!",
-            token_info=token_info,
-            show_logout=True
-        )
-    else:
-        # No valid token, show login button
-        try:
-            oauth_client = get_oauth_client()
-            auth_url = oauth_client.get_authorization_url()
+@app.route('/switch/<user_id>')
+def switch_user(user_id):
+    """Switch default active user."""
+    token_storage.set_default_user(user_id)
+    return redirect(url_for('home'))
 
-            logger.info("Home page: User not authenticated, showing login button")
 
-            return render_template_string(
-                RESULTS_TEMPLATE,
-                title="Basecamp OAuth Demo",
-                message="Welcome! Please log in with your Basecamp account to continue.",
-                auth_url=auth_url
-            )
-        except Exception as e:
-            logger.error("Error getting authorization URL: %s", str(e))
-            return render_template_string(
-                RESULTS_TEMPLATE,
-                title="Error",
-                message=f"Error setting up OAuth: {str(e)}",
-            )
+@app.route('/logout/<user_id>')
+def logout_user(user_id):
+    """Remove specific user token."""
+    token_storage.remove_user_token(user_id)
+    return redirect(url_for('home'))
+
 
 @app.route('/auth/callback')
 def auth_callback():
@@ -245,217 +181,85 @@ def auth_callback():
     code = request.args.get('code')
     error = request.args.get('error')
 
-    if error:
-        logger.error("OAuth callback error: %s", error)
-        return render_template_string(
-            RESULTS_TEMPLATE,
-            title="Authentication Error",
-            message=f"Basecamp returned an error: {error}",
-            show_home=True
-        )
-
-    if not code:
-        logger.error("OAuth callback: No code provided")
-        return render_template_string(
-            RESULTS_TEMPLATE,
-            title="Error",
-            message="No authorization code received.",
-            show_home=True
-        )
+    if error or not code:
+        return redirect(url_for('home'))
 
     try:
-        # Exchange the code for an access token
         oauth_client = get_oauth_client()
-        logger.info("Exchanging code for token")
         token_data = oauth_client.exchange_code_for_token(code)
-        logger.info(
-            "Token exchange succeeded: has_access_token=%s has_refresh_token=%s expires_in=%s",
-            bool(token_data.get('access_token')),
-            bool(token_data.get('refresh_token')),
-            token_data.get('expires_in'),
-        )
 
-        # Store the token in our secure storage
         access_token = token_data.get('access_token')
         refresh_token = token_data.get('refresh_token')
         expires_in = token_data.get('expires_in')
-        account_id = os.getenv('BASECAMP_ACCOUNT_ID')
 
         if not access_token:
-            logger.error("OAuth exchange: No access token received")
-            return render_template_string(
-                RESULTS_TEMPLATE,
-                title="Authentication Error",
-                message="No access token received from Basecamp.",
-                show_home=True
-            )
+            logger.error("No access token in response")
+            return redirect(url_for('home'))
 
-        # Try to get identity if account_id is not set
-        if not account_id:
-            try:
-                logger.info("Getting user identity to find account_id")
-                identity = oauth_client.get_identity(access_token)
-                logger.info("Identity response: %s", identity)
+        # Fetch user identity and accounts from Launchpad
+        user_id = None
+        account_id = os.getenv('BASECAMP_ACCOUNT_ID')
+        email = None
+        name = None
 
-                # Find Basecamp 3 account
-                if identity.get('accounts'):
-                    for account in identity['accounts']:
-                        if account.get('product') == 'bc3':  # Basecamp 3
-                            account_id = account['id']
-                            logger.info("Found account_id: %s", account_id)
-                            break
-            except Exception as identity_error:
-                logger.error("Error getting identity: %s", str(identity_error))
-                # Continue with the flow, but log the error
+        try:
+            identity = oauth_client.get_identity(access_token)
+            logger.info("Identity response: %s", identity)
 
-        logger.info("Storing token with account_id: %s", account_id)
-        stored = token_storage.store_token(
+            user_info = identity.get('identity', {})
+            user_id = str(user_info.get('id') or '')
+            email = user_info.get('email_address')
+            name = f"{user_info.get('first_name', '')} {user_info.get('last_name', '')}".strip()
+
+            # Find first Basecamp 3 account if account_id not set
+            if identity.get('accounts'):
+                for account in identity['accounts']:
+                    if account.get('product') == 'bc3':
+                        account_id = str(account['id'])
+                        break
+        except Exception as e:
+            logger.error(f"Error fetching identity: {e}")
+
+        if not user_id:
+            user_id = account_id or f"user_{secrets.token_hex(4)}"
+
+        token_storage.store_user_token(
+            user_id=user_id,
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in=expires_in,
-            account_id=account_id
+            account_id=account_id,
+            email=email,
+            name=name,
+            set_as_default=True
         )
 
-        if not stored:
-            logger.error("Failed to store token")
-            return render_template_string(
-                RESULTS_TEMPLATE,
-                title="Error",
-                message="Failed to store token. Please try again.",
-                show_home=True
-            )
-
-        # Also keep the access token in session for convenience
-        session['access_token'] = access_token
-        if refresh_token:
-            session['refresh_token'] = refresh_token
-        if account_id:
-            session['account_id'] = account_id
-
-        logger.info("OAuth flow completed successfully")
-
+        logger.info(f"Successfully authenticated user {name} ({user_id})")
         return redirect(url_for('home'))
     except Exception as e:
-        logger.error("Error in OAuth callback: %s", str(e), exc_info=True)
-        return render_template_string(
-            RESULTS_TEMPLATE,
-            title="Error",
-            message=f"Failed to exchange code for token: {str(e)}",
-            show_home=True
-        )
+        logger.error(f"Error in OAuth callback: {e}", exc_info=True)
+        return redirect(url_for('home'))
 
-@app.route('/api/token', methods=['GET'])
-def get_token_api():
-    """
-    Secure API endpoint for the MCP server to get the token.
-    This should only be accessible by the MCP server.
-    """
-    logger.info(
-        "Token API called from %s (has_api_key=%s)",
-        request.remote_addr,
-        bool(request.headers.get('X-API-Key')),
-    )
 
-    # In production, implement proper authentication for this endpoint
-    # For now, we'll use a simple API key check
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or api_key != os.getenv('MCP_API_KEY', 'mcp_secret_key'):
-        logger.error("Token API: Invalid API key")
-        return jsonify({
-            "error": "Unauthorized",
-            "message": "Invalid or missing API key"
-        }), 401
-
-    # Use the ensure_valid_token function to get a fresh token
-    token_data = ensure_valid_token()
-    if not token_data or not token_data.get('access_token'):
-        logger.error("Token API: No valid token available")
-        return jsonify({
-            "error": "Not authenticated",
-            "message": "No valid token available"
-        }), 404
-
-    logger.info("Token API: Successfully returned token")
+@app.route('/api/users', methods=['GET'])
+def get_users_api():
+    """API endpoint to list authenticated users."""
     return jsonify({
-        "access_token": token_data['access_token'],
-        "account_id": token_data.get('account_id')
+        "status": "success",
+        "users": token_storage.list_users()
     })
 
-@app.route('/logout')
-def logout():
-    """Clear the session and token storage."""
-    logger.info("Logout called")
-    session.clear()
-    token_storage.clear_tokens()
-    return redirect(url_for('home'))
-
-@app.route('/token/info')
-def token_info():
-    """Display information about the stored token."""
-    logger.info("Token info called")
-    token_data = token_storage.get_token()
-
-    if not token_data:
-        logger.info("Token info: No token stored")
-        return render_template_string(
-            RESULTS_TEMPLATE,
-            title="Token Information",
-            message="No token stored.",
-            show_home=True
-        )
-
-    # Check if token is expired
-    is_expired = token_storage.is_token_expired()
-    
-    # Mask the tokens for security
-    access_token = token_data.get('access_token', '')
-    refresh_token = token_data.get('refresh_token', '')
-
-    masked_access = f"{access_token[:10]}...{access_token[-10:]}" if len(access_token) > 20 else "***"
-    masked_refresh = f"{refresh_token[:10]}...{refresh_token[-10:]}" if refresh_token and len(refresh_token) > 20 else "***" if refresh_token else None
-
-    display_info = {
-        "access_token": masked_access,
-        "has_refresh_token": bool(refresh_token),
-        "account_id": token_data.get('account_id'),
-        "expires_at": token_data.get('expires_at'),
-        "updated_at": token_data.get('updated_at'),
-        "is_expired": is_expired
-    }
-
-    warning_message = None
-    if is_expired:
-        warning_message = "Warning: Your token is expired! Visit the home page to automatically refresh it, or logout and log back in."
-
-    logger.info("Token info: Returned token info")
-    return render_template_string(
-        RESULTS_TEMPLATE,
-        title="Token Information",
-        content=json.dumps(display_info, indent=2),
-        warning=warning_message,
-        show_home=True
-    )
 
 @app.route('/health')
 def health_check():
     """Health check endpoint."""
-    logger.info("Health check called")
     return jsonify({
         "status": "ok",
         "service": "basecamp-oauth-app"
     })
 
+
 if __name__ == '__main__':
-    try:
-        logger.info("Starting OAuth app on port %s", os.environ.get('PORT', 8000))
-        # Run the Flask app
-        port = int(os.environ.get('PORT', 8000))
-
-        # Disable debug and auto-reloader when running in production or background
-        is_debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
-
-        logger.info("Running in %s mode", "debug" if is_debug else "production")
-        app.run(host='0.0.0.0', port=port, debug=is_debug, use_reloader=is_debug)
-    except Exception as e:
-        logger.error("Fatal error: %s", str(e), exc_info=True)
-        sys.exit(1)
+    port = int(os.environ.get('PORT', 8000))
+    is_debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    app.run(host='0.0.0.0', port=port, debug=is_debug, use_reloader=is_debug)
