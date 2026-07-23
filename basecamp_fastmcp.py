@@ -49,29 +49,31 @@ logger = logging.getLogger('basecamp_fastmcp')
 mcp = FastMCP("basecamp")
 
 # Auth helper functions (reused from original server)
-def _get_basecamp_client() -> Optional[BasecampClient]:
-    """Get authenticated Basecamp client (sync version from original server)."""
+def _get_basecamp_client(user_id: Optional[str] = None) -> Optional[BasecampClient]:
+    """Get authenticated Basecamp client for specific user or active default user."""
     try:
-        token_data = token_storage.get_token()
+        # Determine target user from param, env var BASECAMP_USER_ID or BASECAMP_API_KEY
+        target_user = user_id or os.getenv('BASECAMP_USER_ID') or os.getenv('BASECAMP_API_KEY')
+        token_data = token_storage.get_user_token(target_user)
+
         logger.debug(
-            "Token data retrieved: has_access_token=%s has_refresh_token=%s account_id=%s expires_at=%s",
+            "Token data retrieved for target_user=%s: has_access_token=%s account_id=%s",
+            target_user,
             bool(token_data and token_data.get('access_token')),
-            bool(token_data and token_data.get('refresh_token')),
             token_data.get('account_id') if token_data else None,
-            token_data.get('expires_at') if token_data else None,
         )
 
         if not token_data or not token_data.get('access_token'):
-            logger.error("No OAuth token available")
+            logger.error(f"No OAuth token available for user={target_user}")
             return None
 
-        # Check and automatically refresh if token is expired
-        if not auth_manager.ensure_authenticated():
-            logger.error("OAuth token has expired and automatic refresh failed")
+        # Check and automatically refresh if token is expired for this user
+        if not auth_manager.ensure_authenticated(target_user):
+            logger.error(f"OAuth token has expired for user={target_user} and automatic refresh failed")
             return None
 
         # Get fresh token data after potential refresh
-        token_data = token_storage.get_token()
+        token_data = token_storage.get_user_token(target_user)
 
         # Get account_id from token data first, then fall back to env var
         account_id = token_data.get('account_id') or os.getenv('BASECAMP_ACCOUNT_ID')
@@ -85,7 +87,7 @@ def _get_basecamp_client() -> Optional[BasecampClient]:
             )
             return None
 
-        logger.debug(f"Creating Basecamp client with account_id: {account_id}, user_agent: {user_agent}")
+        logger.debug(f"Creating Basecamp client for user {token_data.get('user_id')} with account_id: {account_id}")
 
         return BasecampClient(
             access_token=token_data['access_token'],
@@ -2753,6 +2755,15 @@ async def reposition_todolist_group(
 # 🎉 COMPLETE FastMCP server with ALL tools migrated!
 
 if __name__ == "__main__":
-    logger.info("Starting Basecamp FastMCP server")
-    # Run using official MCP stdio transport
-    mcp.run(transport='stdio')
+    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
+    port = int(os.getenv("MCP_PORT", os.getenv("PORT", "8001")))
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+
+    logger.info(f"Starting Basecamp FastMCP server (transport={transport}, host={host}, port={port})")
+
+    if transport == "sse":
+        mcp.settings.host = host
+        mcp.settings.port = port
+        mcp.run(transport="sse")
+    else:
+        mcp.run(transport="stdio")
