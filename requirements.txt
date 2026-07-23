@@ -7,3 +7,5 @@ mcp[cli]>=1.2.0
 httpx>=0.25.0
 anyio>=4.0.0
 gunicorn>=21.2.0
+redis>=5.0.0
+cryptography>=41.0.0
