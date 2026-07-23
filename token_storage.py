@@ -1,16 +1,22 @@
 """
-Token storage module for securely storing OAuth tokens.
-
-This module provides a multi-user interface for storing and retrieving OAuth tokens,
-while maintaining full backward compatibility for single-user setups.
+Token storage module with Multi-User support, Encrypted Tokens (Fernet AES),
+Redis Storage backend, and automatic fallback to file storage.
 """
 
 import os
 import json
+import base64
+import hashlib
 import threading
 import secrets
 from datetime import datetime, timedelta
 import logging
+from cryptography.fernet import Fernet
+
+try:
+    import redis
+except ImportError:
+    redis = None
 
 # Determine directory where script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,13 +32,87 @@ _lock = threading.Lock()
 _logger = logging.getLogger(__name__)
 
 
+def _get_fernet_cipher() -> Fernet:
+    """Get Fernet cipher instance using TOKEN_ENCRYPTION_KEY or fallback secret."""
+    raw_key = (
+        os.getenv('TOKEN_ENCRYPTION_KEY') or
+        os.getenv('FLASK_SECRET_KEY') or
+        os.getenv('BASECAMP_CLIENT_SECRET') or
+        'default_basecamp_mcp_encryption_secret_key_12345'
+    )
+    key_bytes = hashlib.sha256(raw_key.encode('utf-8')).digest()
+    fernet_key = base64.urlsafe_b64encode(key_bytes)
+    return Fernet(fernet_key)
+
+
+def encrypt_val(val: str) -> str:
+    """Encrypt sensitive token string."""
+    if not val:
+        return val
+    try:
+        cipher = _get_fernet_cipher()
+        return cipher.encrypt(val.encode('utf-8')).decode('utf-8')
+    except Exception as e:
+        _logger.error(f"Token encryption failed: {e}")
+        return val
+
+
+def decrypt_val(val: str) -> str:
+    """Decrypt sensitive token string (with fallback for unencrypted legacy tokens)."""
+    if not val:
+        return val
+    try:
+        cipher = _get_fernet_cipher()
+        return cipher.decrypt(val.encode('utf-8')).decode('utf-8')
+    except Exception:
+        return val
+
+
+def _get_redis_client():
+    """Get connected Redis client if REDIS_URL is configured and online."""
+    redis_url = os.getenv('REDIS_URL')
+    if not redis_url or not redis:
+        return None
+    try:
+        r = redis.Redis.from_url(redis_url, socket_timeout=2)
+        r.ping()
+        return r
+    except Exception as e:
+        _logger.debug(f"Redis unavailable ({e}), using file storage.")
+        return None
+
+
+def _decrypt_user_data(udata: dict) -> dict:
+    """Return copy of user dict with decrypted tokens."""
+    if not udata:
+        return None
+    data = dict(udata)
+    if 'access_token' in data and data['access_token']:
+        data['access_token'] = decrypt_val(data['access_token'])
+    if 'refresh_token' in data and data['refresh_token']:
+        data['refresh_token'] = decrypt_val(data['refresh_token'])
+    return data
+
+
 def _read_tokens():
-    """Read tokens from storage with automatic migration for legacy format."""
+    """Read tokens from Redis or local JSON file storage."""
+    r = _get_redis_client()
+    if r:
+        try:
+            raw_data = r.get("basecamp:tokens")
+            if raw_data:
+                data = json.loads(raw_data.decode('utf-8'))
+                if 'users' in data:
+                    return data
+        except Exception as e:
+            _logger.error(f"Error reading tokens from Redis: {e}")
+
+    # Fallback to file storage
     try:
         with open(TOKEN_FILE, 'r') as f:
             data = json.load(f)
 
-        # Migrate legacy format if 'users' dict is not present
+        # Migrate legacy single-user format if 'users' dict not present
         if 'users' not in data and 'basecamp' in data:
             legacy_data = data['basecamp']
             user_id = str(legacy_data.get('account_id') or 'default')
@@ -56,17 +136,13 @@ def _read_tokens():
 
         return data
     except FileNotFoundError:
-        _logger.info(f"{TOKEN_FILE} not found. Returning empty tokens.")
         return {'users': {}, 'default_user_id': None}
     except json.JSONDecodeError:
-        _logger.warning(f"Error decoding JSON from {TOKEN_FILE}. Returning empty tokens.")
         return {'users': {}, 'default_user_id': None}
 
 
 def _write_tokens(tokens):
-    """Write tokens to storage securely."""
-    os.makedirs(os.path.dirname(TOKEN_FILE) if os.path.dirname(TOKEN_FILE) else '.', exist_ok=True)
-
+    """Write tokens to Redis and local file storage with encryption."""
     # Maintain legacy 'basecamp' key for backward compatibility
     default_user_id = tokens.get('default_user_id')
     users = tokens.get('users', {})
@@ -76,6 +152,16 @@ def _write_tokens(tokens):
         first_user_id = next(iter(users))
         tokens['basecamp'] = users[first_user_id]
 
+    r = _get_redis_client()
+    if r:
+        try:
+            r.set("basecamp:tokens", json.dumps(tokens))
+            _logger.info("Successfully persisted encrypted tokens to Redis.")
+        except Exception as e:
+            _logger.error(f"Error persisting tokens to Redis: {e}")
+
+    # Also persist to file for double durability
+    os.makedirs(os.path.dirname(TOKEN_FILE) if os.path.dirname(TOKEN_FILE) else '.', exist_ok=True)
     with open(TOKEN_FILE, 'w') as f:
         json.dump(tokens, f, indent=2)
 
@@ -96,7 +182,7 @@ def store_user_token(
     api_key: str = None,
     set_as_default: bool = True
 ) -> bool:
-    """Store OAuth token for a specific user ID."""
+    """Store OAuth token for a specific user ID with token encryption."""
     if not access_token or not user_id:
         return False
 
@@ -116,8 +202,8 @@ def store_user_token(
         users[user_id] = {
             'user_id': user_id,
             'account_id': str(account_id) if account_id else existing_user.get('account_id'),
-            'access_token': access_token,
-            'refresh_token': refresh_token or existing_user.get('refresh_token'),
+            'access_token': encrypt_val(access_token),
+            'refresh_token': encrypt_val(refresh_token) if refresh_token else existing_user.get('refresh_token'),
             'expires_at': expires_at or existing_user.get('expires_at'),
             'updated_at': datetime.now().isoformat(),
             'email': email or existing_user.get('email'),
@@ -135,28 +221,24 @@ def store_user_token(
 
 
 def get_token():
-    """Get the stored OAuth token for default/active user (legacy & mock friendly)."""
+    """Get the stored OAuth token for default/active user (decrypted)."""
     with _lock:
         tokens = _read_tokens()
         users = tokens.get('users', {})
         default_id = tokens.get('default_user_id')
 
         if default_id and default_id in users:
-            return users[default_id]
+            return _decrypt_user_data(users[default_id])
 
         if users:
             first_key = next(iter(users))
-            return users[first_key]
+            return _decrypt_user_data(users[first_key])
 
-        return tokens.get('basecamp')
+        return _decrypt_user_data(tokens.get('basecamp'))
 
 
 def get_user_token(user_id: str = None) -> dict:
-    """Get stored OAuth token for a specific API Key or user ID.
-    
-    To prevent user impersonation in multi-user environments, matching by secret API Key
-    is prioritized.
-    """
+    """Get stored OAuth token for a specific API Key or user ID (decrypted)."""
     if user_id is None:
         return get_token()
 
@@ -168,30 +250,23 @@ def get_user_token(user_id: str = None) -> dict:
         # Priority 1: Match secret API Key (Cryptographically secure token)
         for uid, udata in users.items():
             if udata.get('api_key') == user_id:
-                return udata
+                return _decrypt_user_data(udata)
 
         # Priority 2: Direct lookup by user_id
         if user_id in users:
-            return users[user_id]
+            return _decrypt_user_data(users[user_id])
 
         # Priority 3: Lookup by account_id or email
         for uid, udata in users.items():
             if str(udata.get('account_id')) == user_id or udata.get('email') == user_id:
-                return udata
+                return _decrypt_user_data(udata)
 
         return None
 
 
 def get_user_by_api_key(api_key: str) -> dict:
     """Find user profile by MCP API Key."""
-    if not api_key:
-        return None
-    with _lock:
-        tokens = _read_tokens()
-        for udata in tokens.get('users', {}).values():
-            if udata.get('api_key') == api_key:
-                return udata
-    return None
+    return get_user_token(api_key)
 
 
 def list_users() -> list:
@@ -241,7 +316,7 @@ def _check_expired(expires_at_str: str) -> bool:
 
 
 def is_token_expired():
-    """Check if default token is expired (legacy & mock friendly)."""
+    """Check if default token is expired."""
     token_data = get_token()
     if not token_data or not token_data.get('expires_at'):
         return True
@@ -292,6 +367,12 @@ def store_token(access_token, refresh_token=None, expires_in=None, account_id=No
 def clear_tokens():
     """Clear all stored tokens."""
     with _lock:
+        r = _get_redis_client()
+        if r:
+            try:
+                r.delete("basecamp:tokens")
+            except Exception:
+                pass
         if os.path.exists(TOKEN_FILE):
             os.remove(TOKEN_FILE)
         return True
