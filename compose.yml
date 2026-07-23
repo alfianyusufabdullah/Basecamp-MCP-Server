@@ -1,4 +1,13 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: basecamp-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: always
+
   oauth-app:
     build:
       context: .
@@ -7,10 +16,14 @@ services:
     command: gunicorn --bind 0.0.0.0:8000 --workers 4 --access-logfile - oauth_app:app
     ports:
       - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
     env_file:
       - .env
     volumes:
       - ./oauth_tokens.json:/app/oauth_tokens.json
+    depends_on:
+      - redis
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -30,10 +43,16 @@ services:
     environment:
       - MCP_TRANSPORT=sse
       - MCP_PORT=8001
+      - REDIS_URL=redis://redis:6379/0
     env_file:
       - .env
     volumes:
       - ./oauth_tokens.json:/app/oauth_tokens.json
+    depends_on:
+      - redis
     stdin_open: true
     tty: true
     restart: always
+
+volumes:
+  redis-data:
