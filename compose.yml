@@ -2,8 +2,6 @@ services:
   redis:
     image: redis:7-alpine
     container_name: basecamp-redis
-    ports:
-      - "6379:6379"
     volumes:
       - redis-data:/data
     restart: always
@@ -15,7 +13,7 @@ services:
     container_name: basecamp-oauth-app
     command: gunicorn --bind 0.0.0.0:8000 --workers 4 --access-logfile - oauth_app:app
     ports:
-      - "8000:8000"
+      - "11876:8000"
     environment:
       - REDIS_URL=redis://redis:6379/0
     env_file:
@@ -39,7 +37,7 @@ services:
     container_name: basecamp-mcp-server
     command: python basecamp_fastmcp.py
     ports:
-      - "8001:8001"
+      - "11877:8001"
     environment:
       - MCP_TRANSPORT=sse
       - MCP_PORT=8001
