@@ -11,12 +11,15 @@ import threading
 import secrets
 from datetime import datetime, timedelta
 import logging
+from typing import Optional, Dict, List, Any
 from cryptography.fernet import Fernet
 
 try:
-    import redis
-except ImportError:
-    redis = None
+    import redis  # type: ignore[import-untyped, import-not-found]
+    HAS_REDIS = True
+except Exception:
+    redis = None  # type: ignore[assignment]
+    HAS_REDIS = False
 
 # Determine directory where script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -68,21 +71,24 @@ def decrypt_val(val: str) -> str:
         return val
 
 
-def _get_redis_client():
+def _get_redis_client() -> Any:
     """Get connected Redis client if REDIS_URL is configured and online."""
     redis_url = os.getenv('REDIS_URL')
-    if not redis_url or not redis:
+    if not redis_url or not HAS_REDIS or redis is None:
         return None
     try:
-        r = redis.Redis.from_url(redis_url, socket_timeout=2)
-        r.ping()
-        return r
+        redis_cls: Any = getattr(redis, 'Redis', None)
+        if redis_cls is not None:
+            r: Any = redis_cls.from_url(redis_url, socket_timeout=2)
+            r.ping()
+            return r
+        return None
     except Exception as e:
         _logger.debug(f"Redis unavailable ({e}), using file storage.")
         return None
 
 
-def _decrypt_user_data(udata: dict) -> dict:
+def _decrypt_user_data(udata: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Return copy of user dict with decrypted tokens."""
     if not udata:
         return None
@@ -94,7 +100,7 @@ def _decrypt_user_data(udata: dict) -> dict:
     return data
 
 
-def _read_tokens():
+def _read_tokens() -> Dict[str, Any]:
     """Read tokens from Redis or local JSON file storage."""
     r = _get_redis_client()
     if r:
@@ -141,7 +147,7 @@ def _read_tokens():
         return {'users': {}, 'default_user_id': None}
 
 
-def _write_tokens(tokens):
+def _write_tokens(tokens: Dict[str, Any]) -> None:
     """Write tokens to Redis and local file storage with encryption."""
     # Maintain legacy 'basecamp' key for backward compatibility
     default_user_id = tokens.get('default_user_id')
@@ -174,19 +180,17 @@ def _write_tokens(tokens):
 def store_user_token(
     user_id: str,
     access_token: str,
-    refresh_token: str = None,
-    expires_in: int = None,
-    account_id: str = None,
-    email: str = None,
-    name: str = None,
-    api_key: str = None,
+    refresh_token: Optional[str] = None,
+    expires_in: Optional[int] = None,
+    account_id: Optional[str] = None,
+    email: Optional[str] = None,
+    name: Optional[str] = None,
+    api_key: Optional[str] = None,
     set_as_default: bool = True
 ) -> bool:
     """Store OAuth token for a specific user ID with token encryption."""
     if not access_token or not user_id:
         return False
-
-    user_id = str(user_id)
 
     with _lock:
         tokens = _read_tokens()
@@ -201,7 +205,7 @@ def store_user_token(
 
         users[user_id] = {
             'user_id': user_id,
-            'account_id': str(account_id) if account_id else existing_user.get('account_id'),
+            'account_id': account_id if account_id is not None else existing_user.get('account_id'),
             'access_token': encrypt_val(access_token),
             'refresh_token': encrypt_val(refresh_token) if refresh_token else existing_user.get('refresh_token'),
             'expires_at': expires_at or existing_user.get('expires_at'),
@@ -220,7 +224,7 @@ def store_user_token(
         return True
 
 
-def get_token():
+def get_token() -> Optional[Dict[str, Any]]:
     """Get the stored OAuth token for default/active user (decrypted)."""
     with _lock:
         tokens = _read_tokens()
@@ -237,12 +241,11 @@ def get_token():
         return _decrypt_user_data(tokens.get('basecamp'))
 
 
-def get_user_token(user_id: str = None) -> dict:
+def get_user_token(user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Get stored OAuth token for a specific API Key or user ID (decrypted)."""
     if user_id is None:
         return get_token()
 
-    user_id = str(user_id)
     with _lock:
         tokens = _read_tokens()
         users = tokens.get('users', {})
@@ -264,12 +267,12 @@ def get_user_token(user_id: str = None) -> dict:
         return None
 
 
-def get_user_by_api_key(api_key: str) -> dict:
+def get_user_by_api_key(api_key: str) -> Optional[Dict[str, Any]]:
     """Find user profile by MCP API Key."""
     return get_user_token(api_key)
 
 
-def list_users() -> list:
+def list_users() -> List[Dict[str, Any]]:
     """List all registered users and their session status."""
     with _lock:
         tokens = _read_tokens()
@@ -278,6 +281,8 @@ def list_users() -> list:
 
         user_list = []
         for uid, udata in users.items():
+            expires_at_val = udata.get('expires_at')
+            expires_at_str = expires_at_val if isinstance(expires_at_val, str) else None
             user_list.append({
                 'user_id': uid,
                 'account_id': udata.get('account_id'),
@@ -285,16 +290,15 @@ def list_users() -> list:
                 'name': udata.get('name'),
                 'api_key': udata.get('api_key'),
                 'updated_at': udata.get('updated_at'),
-                'expires_at': udata.get('expires_at'),
+                'expires_at': expires_at_val,
                 'is_default': uid == default_id,
-                'is_expired': _check_expired(udata.get('expires_at'))
+                'is_expired': _check_expired(expires_at_str)
             })
         return user_list
 
 
 def set_default_user(user_id: str) -> bool:
     """Set default active user ID."""
-    user_id = str(user_id)
     with _lock:
         tokens = _read_tokens()
         if user_id in tokens.get('users', {}):
@@ -304,7 +308,7 @@ def set_default_user(user_id: str) -> bool:
         return False
 
 
-def _check_expired(expires_at_str: str) -> bool:
+def _check_expired(expires_at_str: Optional[str]) -> bool:
     """Helper to check expiration time with 5-minute buffer."""
     if not expires_at_str:
         return True
@@ -315,15 +319,17 @@ def _check_expired(expires_at_str: str) -> bool:
         return True
 
 
-def is_token_expired():
+def is_token_expired() -> bool:
     """Check if default token is expired."""
     token_data = get_token()
-    if not token_data or not token_data.get('expires_at'):
+    if not token_data:
         return True
-    return _check_expired(token_data.get('expires_at'))
+    expires_at = token_data.get('expires_at')
+    expires_at_str = expires_at if isinstance(expires_at, str) else None
+    return _check_expired(expires_at_str)
 
 
-def is_user_token_expired(user_id: str = None) -> bool:
+def is_user_token_expired(user_id: Optional[str] = None) -> bool:
     """Check if token for specific user (or default user) is expired."""
     if user_id is None:
         return is_token_expired()
@@ -331,14 +337,12 @@ def is_user_token_expired(user_id: str = None) -> bool:
     if not user_data:
         return is_token_expired()
     expires_at = user_data.get('expires_at')
-    if not expires_at:
-        return is_token_expired()
-    return _check_expired(expires_at)
+    expires_at_str = expires_at if isinstance(expires_at, str) else None
+    return _check_expired(expires_at_str)
 
 
 def remove_user_token(user_id: str) -> bool:
     """Remove a user token session."""
-    user_id = str(user_id)
     with _lock:
         tokens = _read_tokens()
         users = tokens.get('users', {})
@@ -352,7 +356,7 @@ def remove_user_token(user_id: str) -> bool:
         return False
 
 
-def store_token(access_token, refresh_token=None, expires_in=None, account_id=None):
+def store_token(access_token: str, refresh_token: Optional[str] = None, expires_in: Optional[int] = None, account_id: Optional[str] = None) -> bool:
     """Legacy wrapper."""
     user_id = str(account_id or 'default')
     return store_user_token(
@@ -364,7 +368,7 @@ def store_token(access_token, refresh_token=None, expires_in=None, account_id=No
     )
 
 
-def clear_tokens():
+def clear_tokens() -> bool:
     """Clear all stored tokens."""
     with _lock:
         r = _get_redis_client()
