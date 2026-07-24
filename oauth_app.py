@@ -219,19 +219,19 @@ SHADCN_DASHBOARD_TEMPLATE = """
 
                 <!-- Tab Contents -->
                 <div id="content-claude-cli" class="tab-content relative">
-                    <pre class="bg-slate-950 p-3 rounded-lg text-xs text-slate-300 overflow-x-auto border border-slate-800 font-mono">claude mcp add basecamp --transport sse "http://localhost:8001/sse?api_key={{ current_user.api_key }}"</pre>
-                    <button onclick="copyText('claude mcp add basecamp --transport sse &quot;http://localhost:8001/sse?api_key={{ current_user.api_key }}&quot;', 'Claude CLI command copied!')" class="absolute top-2 right-2 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-medium border border-slate-700">Copy</button>
+                    <pre class="bg-slate-950 p-3 rounded-lg text-xs text-slate-300 overflow-x-auto border border-slate-800 font-mono">claude mcp add basecamp --transport sse "{{ mcp_server_url }}/sse?api_key={{ current_user.api_key }}"</pre>
+                    <button onclick="copyText('claude mcp add basecamp --transport sse &quot;{{ mcp_server_url }}/sse?api_key={{ current_user.api_key }}&quot;', 'Claude CLI command copied!')" class="absolute top-2 right-2 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-medium border border-slate-700">Copy</button>
                 </div>
 
                 <div id="content-claude-desktop" class="tab-content hidden relative">
                     <pre class="bg-slate-950 p-3 rounded-lg text-xs text-slate-300 overflow-x-auto border border-slate-800 font-mono">{
   "mcpServers": {
     "basecamp": {
-      "url": "http://localhost:8001/sse?api_key={{ current_user.api_key }}"
+      "url": "{{ mcp_server_url }}/sse?api_key={{ current_user.api_key }}"
     }
   }
 }</pre>
-                    <button onclick="copyText('{\n  &quot;mcpServers&quot;: {\n    &quot;basecamp&quot;: {\n      &quot;url&quot;: &quot;http://localhost:8001/sse?api_key={{ current_user.api_key }}&quot;\n    }\n  }\n}', 'Claude Desktop config copied!')" class="absolute top-2 right-2 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-medium border border-slate-700">Copy</button>
+                    <button onclick="copyText('{\n  &quot;mcpServers&quot;: {\n    &quot;basecamp&quot;: {\n      &quot;url&quot;: &quot;{{ mcp_server_url }}/sse?api_key={{ current_user.api_key }}&quot;\n    }\n  }\n}', 'Claude Desktop config copied!')" class="absolute top-2 right-2 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-medium border border-slate-700">Copy</button>
                 </div>
 
                 <div id="content-docker-env" class="tab-content hidden relative">
@@ -381,11 +381,18 @@ def home():
     except Exception as e:
         logger.error(f"Error generating auth url: {e}")
 
+    mcp_server_url = (
+        os.getenv('BASECAMP_MCP_SERVER_URL') or
+        os.getenv('MCP_SERVER_URL') or
+        'http://localhost:8001'
+    ).rstrip('/')
+
     return render_template_string(
         SHADCN_DASHBOARD_TEMPLATE,
         current_user=current_user,
         all_users=all_users,
-        auth_url=auth_url
+        auth_url=auth_url,
+        mcp_server_url=mcp_server_url
     )
 
 
@@ -405,6 +412,10 @@ def logout():
     session.pop('user_id', None)
     if user_id:
         token_storage.remove_user_token(user_id)
+    else:
+        current_user = token_storage.get_token()
+        if current_user and current_user.get('user_id'):
+            token_storage.remove_user_token(current_user['user_id'])
     return redirect(url_for('home'))
 
 
