@@ -13,7 +13,7 @@ import sys
 from typing import Any, Dict, List, Optional
 import anyio
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import (
     BlobResourceContents,
     EmbeddedResource,
@@ -49,11 +49,20 @@ logger = logging.getLogger('basecamp_fastmcp')
 mcp = FastMCP("basecamp")
 
 # Auth helper functions (reused from original server)
-def _get_basecamp_client(user_id: Optional[str] = None) -> Optional[BasecampClient]:
-    """Get authenticated Basecamp client for specific user or active default user."""
+def _get_basecamp_client(user_id: Optional[str] = None, ctx: Optional[Context] = None) -> Optional[BasecampClient]:
+    """Get authenticated Basecamp client for specific user API key or explicit user_id."""
     try:
-        # Determine target user from param, env var BASECAMP_USER_ID or BASECAMP_API_KEY
-        target_user = user_id or os.getenv('BASECAMP_USER_ID') or os.getenv('BASECAMP_API_KEY')
+        api_key_from_query = None
+        if ctx and ctx.request_context and ctx.request_context.request:
+            req = ctx.request_context.request
+            if hasattr(req, 'query_params'):
+                api_key_from_query = req.query_params.get('api_key')
+
+        target_user = user_id or api_key_from_query or os.getenv('BASECAMP_API_KEY') or os.getenv('BASECAMP_USER_ID')
+        if not target_user:
+            logger.error("No user_id or API key provided for Basecamp client authentication.")
+            return None
+
         token_data = token_storage.get_user_token(target_user)
 
         logger.debug(

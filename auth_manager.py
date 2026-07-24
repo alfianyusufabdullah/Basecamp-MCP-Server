@@ -23,7 +23,7 @@ def ensure_authenticated(user_id: Optional[str] = None) -> bool:
     Returns:
         bool: True if authenticated (or successfully refreshed), False otherwise.
     """
-    token_data = token_storage.get_user_token(user_id)
+    token_data = token_storage.get_user_token(user_id) if user_id else token_storage.get_token()
 
     if not token_data or not token_data.get('access_token'):
         logger.error(f"No token data found for user_id={user_id}. Initial authentication required.")
