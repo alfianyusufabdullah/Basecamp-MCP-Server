@@ -62,7 +62,7 @@ def test_store_and_retrieve_multiple_users(temp_token_file):
     assert u2['email'] == "user2@example.com"
 
     # Retrieve default user (should be user_1 because set_as_default=True)
-    default_user = token_storage.get_user_token(None)
+    default_user = token_storage.get_token()
     assert default_user['user_id'] == "user_1"
 
     # List users
@@ -74,13 +74,21 @@ def test_set_default_user_and_removal(temp_token_file):
     token_storage.store_user_token("u1", "token1", account_id="acc1", set_as_default=True)
     token_storage.store_user_token("u2", "token2", account_id="acc2", set_as_default=False)
 
-    assert token_storage.get_user_token(None)['user_id'] == "u1"
+    assert token_storage.get_token()['user_id'] == "u1"
 
     # Switch default user
     assert token_storage.set_default_user("u2") is True
-    assert token_storage.get_user_token(None)['user_id'] == "u2"
+    assert token_storage.get_token()['user_id'] == "u2"
 
     # Remove default user
     assert token_storage.remove_user_token("u2") is True
-    assert token_storage.get_user_token(None)['user_id'] == "u1"
+    assert token_storage.get_token()['user_id'] == "u1"
     assert len(token_storage.list_users()) == 1
+
+
+def test_get_user_token_strict_isolation_when_none(temp_token_file):
+    token_storage.store_user_token("u1", "token1", account_id="acc1")
+    assert token_storage.get_user_token(None) is None
+    assert token_storage.get_user_token("") is None
+    assert token_storage.get_user_token("invalid_key_123") is None
+

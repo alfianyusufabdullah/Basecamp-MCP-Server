@@ -245,8 +245,8 @@ def get_token() -> Optional[Dict[str, Any]]:
 
 def get_user_token(user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Get stored OAuth token for a specific API Key or user ID (decrypted)."""
-    if user_id is None:
-        return get_token()
+    if not user_id:
+        return None
 
     with _lock:
         tokens = _read_tokens()
@@ -257,21 +257,24 @@ def get_user_token(user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
             if udata.get('api_key') == user_id:
                 return _decrypt_user_data(udata)
 
-        # Priority 2: Direct lookup by user_id
+        # Priority 2: Direct lookup by internal user_id key
         if user_id in users:
             return _decrypt_user_data(users[user_id])
-
-        # Priority 3: Lookup by account_id or email
-        for uid, udata in users.items():
-            if str(udata.get('account_id')) == user_id or udata.get('email') == user_id:
-                return _decrypt_user_data(udata)
 
         return None
 
 
 def get_user_by_api_key(api_key: str) -> Optional[Dict[str, Any]]:
-    """Find user profile by MCP API Key."""
-    return get_user_token(api_key)
+    """Find user profile strictly by secret MCP API Key."""
+    if not api_key:
+        return None
+    with _lock:
+        tokens = _read_tokens()
+        users = tokens.get('users', {})
+        for uid, udata in users.items():
+            if udata.get('api_key') == api_key:
+                return _decrypt_user_data(udata)
+        return None
 
 
 def list_users() -> List[Dict[str, Any]]:
@@ -344,7 +347,9 @@ def is_user_token_expired(user_id: Optional[str] = None) -> bool:
 
 
 def remove_user_token(user_id: str) -> bool:
-    """Remove a user token session."""
+    """Remove a user token session strictly by user_id or secret api_key."""
+    if not user_id:
+        return False
     with _lock:
         tokens = _read_tokens()
         users = tokens.get('users', {})
@@ -353,7 +358,7 @@ def remove_user_token(user_id: str) -> bool:
             target_uid = user_id
         else:
             for uid, udata in users.items():
-                if str(udata.get('account_id')) == user_id or udata.get('email') == user_id or udata.get('api_key') == user_id:
+                if udata.get('api_key') == user_id:
                     target_uid = uid
                     break
 
