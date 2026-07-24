@@ -52,3 +52,30 @@ def test_redis_storage_fallback_on_file(temp_token_file, monkeypatch):
     assert retrieved is not None
     assert retrieved['access_token'] == "secret_token_abc"
     assert retrieved['refresh_token'] == "secret_refresh_xyz"
+
+
+def test_redis_storage_does_not_write_to_file(temp_token_file, monkeypatch):
+    mock_redis = mock.MagicMock()
+    mock_redis.ping.return_value = True
+    mock_redis.get.return_value = None
+
+    monkeypatch.setenv('REDIS_URL', 'redis://localhost:6379/0')
+    monkeypatch.setattr(token_storage, '_get_redis_client', lambda: mock_redis)
+
+    token_storage.store_user_token(
+        user_id="user_redis_only",
+        access_token="secret_redis_token",
+        account_id="acc_redis_1"
+    )
+
+    mock_redis.set.assert_called_once()
+    # Ensure file size is 0 (file was not written to)
+    assert os.path.getsize(temp_token_file) == 0
+
+
+def test_redis_connection_failure_raises_error(monkeypatch):
+    monkeypatch.setenv('REDIS_URL', 'redis://invalid-host-9999:6379/0')
+    with pytest.raises(RuntimeError, match="Failed to connect to Redis"):
+        token_storage._get_redis_client()
+
+

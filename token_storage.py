@@ -72,20 +72,22 @@ def decrypt_val(val: str) -> str:
 
 
 def _get_redis_client() -> Any:
-    """Get connected Redis client if REDIS_URL is configured and online."""
+    """Get connected Redis client if REDIS_URL is configured. Raises RuntimeError if connection fails."""
     redis_url = os.getenv('REDIS_URL')
-    if not redis_url or not HAS_REDIS or redis is None:
+    if not redis_url:
         return None
+    if not HAS_REDIS or redis is None:
+        raise RuntimeError("REDIS_URL is configured but 'redis' package is not installed.")
     try:
         redis_cls: Any = getattr(redis, 'Redis', None)
         if redis_cls is not None:
             r: Any = redis_cls.from_url(redis_url, socket_timeout=2)
             r.ping()
             return r
-        return None
+        raise RuntimeError("redis.Redis class not found.")
     except Exception as e:
-        _logger.debug(f"Redis unavailable ({e}), using file storage.")
-        return None
+        _logger.error(f"Redis connection failed for URL {redis_url}: {e}")
+        raise RuntimeError(f"Failed to connect to Redis at {redis_url}: {e}") from e
 
 
 def _decrypt_user_data(udata: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -101,19 +103,18 @@ def _decrypt_user_data(udata: Optional[Dict[str, Any]]) -> Optional[Dict[str, An
 
 
 def _read_tokens() -> Dict[str, Any]:
-    """Read tokens from Redis or local JSON file storage."""
-    r = _get_redis_client()
-    if r:
-        try:
-            raw_data = r.get("basecamp:tokens")
-            if raw_data:
-                data = json.loads(raw_data.decode('utf-8'))
-                if 'users' in data:
-                    return data
-        except Exception as e:
-            _logger.error(f"Error reading tokens from Redis: {e}")
+    """Read tokens from Redis if REDIS_URL is set, otherwise from local JSON file storage."""
+    redis_url = os.getenv('REDIS_URL')
+    if redis_url:
+        r = _get_redis_client()  # Raises RuntimeError if Redis connection fails
+        raw_data = r.get("basecamp:tokens")
+        if raw_data:
+            data = json.loads(raw_data.decode('utf-8'))
+            if 'users' in data:
+                return data
+        return {'users': {}, 'default_user_id': None}
 
-    # Fallback to file storage
+    # File storage only used when REDIS_URL is unconfigured
     try:
         with open(TOKEN_FILE, 'r') as f:
             data = json.load(f)
@@ -148,7 +149,7 @@ def _read_tokens() -> Dict[str, Any]:
 
 
 def _write_tokens(tokens: Dict[str, Any]) -> None:
-    """Write tokens to Redis and local file storage with encryption."""
+    """Write tokens to Redis if REDIS_URL is set, otherwise to local file storage."""
     # Maintain legacy 'basecamp' key for backward compatibility
     default_user_id = tokens.get('default_user_id')
     users = tokens.get('users', {})
@@ -157,16 +158,17 @@ def _write_tokens(tokens: Dict[str, Any]) -> None:
     elif users:
         first_user_id = next(iter(users))
         tokens['basecamp'] = users[first_user_id]
+    else:
+        tokens.pop('basecamp', None)
 
-    r = _get_redis_client()
-    if r:
-        try:
-            r.set("basecamp:tokens", json.dumps(tokens))
-            _logger.info("Successfully persisted encrypted tokens to Redis.")
-        except Exception as e:
-            _logger.error(f"Error persisting tokens to Redis: {e}")
+    redis_url = os.getenv('REDIS_URL')
+    if redis_url:
+        r = _get_redis_client()  # Raises RuntimeError if Redis connection fails
+        r.set("basecamp:tokens", json.dumps(tokens))
+        _logger.info("Successfully persisted encrypted tokens to Redis.")
+        return
 
-    # Also persist to file for double durability
+    # File storage only used when REDIS_URL is unconfigured
     os.makedirs(os.path.dirname(TOKEN_FILE) if os.path.dirname(TOKEN_FILE) else '.', exist_ok=True)
     with open(TOKEN_FILE, 'w') as f:
         json.dump(tokens, f, indent=2)
@@ -346,11 +348,23 @@ def remove_user_token(user_id: str) -> bool:
     with _lock:
         tokens = _read_tokens()
         users = tokens.get('users', {})
+        target_uid = None
         if user_id in users:
-            del users[user_id]
-            if tokens.get('default_user_id') == user_id:
+            target_uid = user_id
+        else:
+            for uid, udata in users.items():
+                if str(udata.get('account_id')) == user_id or udata.get('email') == user_id or udata.get('api_key') == user_id:
+                    target_uid = uid
+                    break
+
+        if target_uid and target_uid in users:
+            del users[target_uid]
+            if tokens.get('default_user_id') == target_uid:
                 tokens['default_user_id'] = next(iter(users)) if users else None
             tokens['users'] = users
+            if not users:
+                tokens.pop('basecamp', None)
+                tokens['default_user_id'] = None
             _write_tokens(tokens)
             return True
         return False
