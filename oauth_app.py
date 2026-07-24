@@ -362,17 +362,13 @@ def get_oauth_client():
 
 @app.route('/')
 def home():
-    """Shadcn UI Single-User Active Profile Dashboard."""
-    all_users = token_storage.list_users()
-    
-    # Priority: 1. Active user in session, 2. Default active user in token_storage
+    """Shadcn UI Active Profile Dashboard with strict per-browser session isolation."""
     user_id_in_session = session.get('user_id')
     current_user = None
     if user_id_in_session:
         current_user = token_storage.get_user_token(user_id_in_session)
 
-    if not current_user:
-        current_user = token_storage.get_user_token(None)
+    all_users = token_storage.list_users() if current_user else []
 
     auth_url = None
     try:
@@ -398,24 +394,19 @@ def home():
 
 @app.route('/switch/<user_id>')
 def switch_user(user_id):
-    """Switch default active user and set in session."""
+    """Switch active user profile in session."""
     user_id = str(user_id)
-    token_storage.set_default_user(user_id)
-    session['user_id'] = user_id
+    if token_storage.get_user_token(user_id):
+        session['user_id'] = user_id
     return redirect(url_for('home'))
 
 
 @app.route('/logout')
 def logout():
-    """Log out active session (or delete user session)."""
-    user_id = session.get('user_id')
-    session.pop('user_id', None)
+    """Log out active browser session."""
+    user_id = session.pop('user_id', None)
     if user_id:
         token_storage.remove_user_token(user_id)
-    else:
-        current_user = token_storage.get_token()
-        if current_user and current_user.get('user_id'):
-            token_storage.remove_user_token(current_user['user_id'])
     return redirect(url_for('home'))
 
 
