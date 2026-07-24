@@ -142,26 +142,6 @@ SHADCN_DASHBOARD_TEMPLATE = """
                 </div>
 
                 <div class="flex items-center gap-2">
-                    {% if all_users|length > 1 %}
-                        <!-- Switch Account Dropdown Button -->
-                        <div class="relative group">
-                            <button class="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
-                                Switch Account ({{ all_users|length }})
-                            </button>
-                            <div class="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-xl py-2 hidden group-hover:block z-50">
-                                <div class="px-3 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Switch Active Profile</div>
-                                {% for u in all_users %}
-                                    <a href="/switch/{{ u.user_id }}" class="px-3 py-2 text-xs flex items-center justify-between hover:bg-slate-800 text-slate-300 hover:text-white transition">
-                                        <span class="truncate">{{ u.name or u.email }}</span>
-                                        {% if u.user_id == current_user.user_id %}
-                                            <span class="text-emerald-400">✓</span>
-                                        {% endif %}
-                                    </a>
-                                {% endfor %}
-                            </div>
-                        </div>
-                    {% endif %}
                     <a href="/logout" class="px-3 py-1.5 text-xs font-medium bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 transition flex items-center gap-1.5">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                         Sign Out
@@ -244,11 +224,6 @@ BASECAMP_ACCOUNT_ID={{ current_user.account_id }}</pre>
             <!-- Footer Action -->
             <div class="pt-4 border-t border-slate-800/80 flex justify-between items-center text-xs text-slate-400">
                 <span>Logged in as <strong class="text-slate-200">{{ current_user.name or current_user.user_id }}</strong></span>
-                {% if auth_url %}
-                    <a href="{{ auth_url }}" class="text-emerald-400 hover:underline flex items-center gap-1">
-                        ➕ Connect Another Account
-                    </a>
-                {% endif %}
             </div>
         </div>
 
@@ -368,8 +343,6 @@ def home():
     if user_id_in_session:
         current_user = token_storage.get_user_token(user_id_in_session)
 
-    all_users = token_storage.list_users() if current_user else []
-
     auth_url = None
     try:
         oauth_client = get_oauth_client()
@@ -386,19 +359,9 @@ def home():
     return render_template_string(
         SHADCN_DASHBOARD_TEMPLATE,
         current_user=current_user,
-        all_users=all_users,
         auth_url=auth_url,
         mcp_server_url=mcp_server_url
     )
-
-
-@app.route('/switch/<user_id>')
-def switch_user(user_id):
-    """Switch active user profile in session."""
-    user_id = str(user_id)
-    if token_storage.get_user_token(user_id):
-        session['user_id'] = user_id
-    return redirect(url_for('home'))
 
 
 @app.route('/logout')
@@ -407,16 +370,6 @@ def logout():
     user_id = session.pop('user_id', None)
     if user_id:
         token_storage.remove_user_token(user_id)
-    return redirect(url_for('home'))
-
-
-@app.route('/logout/<user_id>')
-def logout_user(user_id):
-    """Remove specific user token."""
-    user_id = str(user_id)
-    if session.get('user_id') == user_id:
-        session.pop('user_id', None)
-    token_storage.remove_user_token(user_id)
     return redirect(url_for('home'))
 
 
@@ -489,13 +442,7 @@ def auth_callback():
         return redirect(url_for('home'))
 
 
-@app.route('/api/users', methods=['GET'])
-def get_users_api():
-    """API endpoint to list authenticated users."""
-    return jsonify({
-        "status": "success",
-        "users": token_storage.list_users()
-    })
+
 
 
 @app.route('/health')
