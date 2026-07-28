@@ -201,19 +201,19 @@ SHADCN_DASHBOARD_TEMPLATE = """
 
                 <!-- Tab Contents -->
                 <div id="content-claude-cli" class="tab-content relative">
-                    <pre class="bg-slate-950 p-3 rounded-lg text-xs text-slate-300 overflow-x-auto border border-slate-800 font-mono">claude mcp add basecamp --transport sse "{{ mcp_server_url }}/sse?api_key={{ current_user.api_key }}"</pre>
-                    <button onclick="copyText('claude mcp add basecamp --transport sse &quot;{{ mcp_server_url }}/sse?api_key={{ current_user.api_key }}&quot;', 'Claude CLI command copied!')" class="absolute top-2 right-2 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-medium border border-slate-700">Copy</button>
+                    <pre class="bg-slate-950 p-3 rounded-lg text-xs text-slate-300 overflow-x-auto border border-slate-800 font-mono">claude mcp add basecamp --transport http "{{ mcp_server_url }}/mcp?api_key={{ current_user.api_key }}"</pre>
+                    <button onclick="copyText('claude mcp add basecamp --transport http &quot;{{ mcp_server_url }}/mcp?api_key={{ current_user.api_key }}&quot;', 'Claude CLI command copied!')" class="absolute top-2 right-2 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-medium border border-slate-700">Copy</button>
                 </div>
 
                 <div id="content-claude-desktop" class="tab-content hidden relative">
                     <pre class="bg-slate-950 p-3 rounded-lg text-xs text-slate-300 overflow-x-auto border border-slate-800 font-mono">{
   "mcpServers": {
     "basecamp": {
-      "url": "{{ mcp_server_url }}/sse?api_key={{ current_user.api_key }}"
+      "url": "{{ mcp_server_url }}/mcp?api_key={{ current_user.api_key }}"
     }
   }
 }</pre>
-                    <button onclick="copyText('{\n  &quot;mcpServers&quot;: {\n    &quot;basecamp&quot;: {\n      &quot;url&quot;: &quot;{{ mcp_server_url }}/sse?api_key={{ current_user.api_key }}&quot;\n    }\n  }\n}', 'Claude Desktop config copied!')" class="absolute top-2 right-2 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-medium border border-slate-700">Copy</button>
+                    <button onclick="copyText('{\n  &quot;mcpServers&quot;: {\n    &quot;basecamp&quot;: {\n      &quot;url&quot;: &quot;{{ mcp_server_url }}/mcp?api_key={{ current_user.api_key }}&quot;\n    }\n  }\n}', 'Claude Desktop config copied!')" class="absolute top-2 right-2 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-medium border border-slate-700">Copy</button>
                 </div>
 
                 <div id="content-docker-env" class="tab-content hidden relative">

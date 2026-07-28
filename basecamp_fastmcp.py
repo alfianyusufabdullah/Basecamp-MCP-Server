@@ -2770,9 +2770,14 @@ if __name__ == "__main__":
 
     logger.info(f"Starting Basecamp FastMCP server (transport={transport}, host={host}, port={port})")
 
-    if transport == "sse":
+    if transport in ("streamable-http", "http", "streamable_http"):
+        mcp.settings.host = host
+        mcp.settings.port = port
+        mcp.run(transport="streamable-http")
+    elif transport == "sse":
         mcp.settings.host = host
         mcp.settings.port = port
         mcp.run(transport="sse")
     else:
         mcp.run(transport="stdio")
+
