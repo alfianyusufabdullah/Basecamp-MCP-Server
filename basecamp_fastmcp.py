@@ -53,6 +53,12 @@ mcp = FastMCP("basecamp")
 def _get_basecamp_client(user_id: Optional[str] = None, ctx: Optional[Context] = None) -> Optional[BasecampClient]:
     """Get authenticated Basecamp client for specific user API key or explicit user_id."""
     try:
+        if ctx is None:
+            try:
+                ctx = mcp.get_context()
+            except Exception:
+                ctx = None
+
         api_key_from_query = None
         if ctx and ctx.request_context and ctx.request_context.request:
             req = ctx.request_context.request
