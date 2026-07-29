@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import anyio
 import httpx
 from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import (
     BlobResourceContents,
     EmbeddedResource,
@@ -2770,13 +2771,29 @@ if __name__ == "__main__":
 
     logger.info(f"Starting Basecamp FastMCP server (transport={transport}, host={host}, port={port})")
 
-    if transport in ("streamable-http", "http", "streamable_http"):
+    if transport in ("streamable-http", "http", "streamable_http", "sse"):
         mcp.settings.host = host
         mcp.settings.port = port
+
+        allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+        allowed_origins = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+        extra_hosts = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+        allowed_hosts.extend(extra_hosts)
+        allowed_origins.extend(f"https://{h}" for h in extra_hosts)
+        allowed_origins.extend(f"http://{h}" for h in extra_hosts)
+
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=allowed_hosts,
+            allowed_origins=allowed_origins,
+        )
+
+        if extra_hosts:
+            logger.info(f"DNS rebinding protection: allowed extra hosts = {extra_hosts}")
+
+    if transport in ("streamable-http", "http", "streamable_http"):
         mcp.run(transport="streamable-http")
     elif transport == "sse":
-        mcp.settings.host = host
-        mcp.settings.port = port
         mcp.run(transport="sse")
     else:
         mcp.run(transport="stdio")
